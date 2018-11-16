@@ -1,0 +1,529 @@
+/////////////////////////////////////////////////////////////////////////////
+// Author       : Adrian Gersbach
+// Date         : 03.03.2002
+// Version      : v4.10
+//
+// Changes      : v3.13
+//                - optimizing v3.11
+//                - make nPos a Global Variable
+//               
+//                v4.00
+//                - adding Ringbuffer
+//                      
+//                v4.01
+//                - new Ring Buffer
+//                - inproved push_Text and wipe_Text
+//
+//                v4.02
+//                - resolving Generic Pointer problem
+//                - optimizing code size
+//                - optimizing move_Text()
+//                - enum
+//                - push_Text has been improved
+//                  using >> bit Shift Operator instead of MUL and DIV
+//                - trying to put in an performanc view of the Ring Buffer
+//                
+//                v4.10
+//                - resolving Generic Pointer problem
+//                  removing get_TextRow and change
+//  
+/////////////////////////////////////////////////////////////////////////////
+
+/* Include - Files */
+#include "System.h"
+#include "ATTimer.h"
+#include "ATBios.h"
+#include "ATText.h"
+
+// Display controll
+    
+static uchar m_nPos = DISPLAY_CX_MIN;
+static uchar m_nDisplay = DISP_OFF;
+
+// Config for push_Text
+#define PUSH_PAUSE  18      // Values 0-255 default 18
+
+typedef union tagDISP
+{
+  uint all;
+  uchar Text[2];
+} DISP, *PDISP;
+
+typedef enum RAM
+{
+  MSB = 0,
+  LSB
+};
+
+// Config for wipe_Text
+#define WIPE_SPEED  3       // Values 0-255 default 4
+#define WIPE_PAUSE  36      // Values 0-255 deafult 18
+
+// Config for move_Text
+/*
+static uchar code moveTEXT_GER[] = {"Frohe Weihnacht und ein glueckliches neues Jahr 2002"};
+#define MOVE_TEXT_GER_LEN   sizeof(moveTEXT_GER) * ZEICHEN
+
+static uchar code moveTEXT_ENG[] = {"Merry Christmas and a Happy New Year 2002"};
+#define MOVE_TEXT_ENG_LEN   sizeof(moveTEXT_ENG) * ZEICHEN
+*/
+
+// Config for Token controll
+
+typedef enum TOKEN
+{
+  GER_OU = 0,
+  GER_WP,
+  GER_LS,
+  ENG_OU,
+  ENG_WP,
+  ENG_LS
+};
+
+static uchar data m_TokenJobList[] = {0, 1, 2, 3, 4, 5};
+static uchar data * data m_pToken = m_TokenJobList;                   // Pointer auf momentanes Schriftmodule
+
+#define TOKEN_LIST_LEN          sizeof (m_TokenJobList) 
+#define TOKEN_LIST_START        m_TokenJobList
+#define TOKEN_LIST_END          m_TokenJobList + TOKEN_LIST_LEN
+
+
+/////////////////////////////////////////////////////////////////////////////
+// Local Defines
+/////////////////////////////////////////////////////////////////////////////
+
+#define WIPE_LEFT_2_RIGHT   ((bit) (TRUE))     //
+#define WIPE_RIGHT_2_LEFT   ((bit) (FALSE))    //
+
+/////////////////////////////////////////////////////////////////////////////
+// Next Token
+
+void next_Token()
+{
+  m_pToken++;
+
+  if (m_pToken >= TOKEN_LIST_END)
+  {
+    m_pToken = TOKEN_LIST_START;
+  }
+}
+
+/////////////////////////////////////////////////////////////////////////////
+// Push Text
+
+void push_Text(uchar nTextID)
+{
+  static bit bPush = TRUE;
+  
+  static uchar wait = 0;
+  static uchar step = 0;
+  static uchar nextText = 0;
+
+  data DISP result;
+
+  // Function
+  set_Ascii (m_nPos);
+  result.Text[LSB] = ascii2LCD (nTextID, nextText);  // LSB
+
+  if (bPush == TRUE)
+  {   
+    result.Text[MSB] = ascii2LCD (nTextID, nextText+1); // MSB
+    m_nDisplay = result.all >> step; 
+  }
+  else
+  {
+    m_nDisplay = result.Text[LSB];  // LSB
+  } // end_if
+  
+  if (m_nPos == DISPLAY_CX_MAX)
+  {
+    if (bPush == TRUE)
+    {
+      if (step < 7)
+      {
+        step++; 
+      }
+      else
+      {
+        step = 0;
+        wait = 0;
+              
+        if (nextText < get_TextLen (nTextID)/*nTextLen*/)
+        {
+          nextText++;
+          bPush = FALSE;
+        }
+        else
+        {
+          nextText = 0;
+          bPush = TRUE;
+                  
+          next_Token();
+        } // end_if
+      } // end_if
+    }
+    else
+    {
+      if (wait < PUSH_PAUSE)
+      {
+        wait++;
+      }
+      else
+      {
+        wait = 0;
+        bPush = TRUE;
+      } // end_if
+    } // end_if 
+  }
+  else
+  {
+    // NOP
+  } // end_if
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// Wipe
+/*
+void wipe_Text(uchar nTextID)
+{
+  static bit bWipe = TRUE;
+  static bit bToggle = WIPE_LEFT_2_RIGHT;  // if True "Start to End" else "End to Start"
+
+  static char cx = DISPLAY_CX_MIN;       // Achtung signed char -128 to 127
+  static uchar wait = 0;
+  static uchar nextText = 0;
+    
+  // Function
+  if (m_nPos == cx)
+  {
+    m_nDisplay = DISP_ON;
+  }   
+  else
+  {
+    uchar TextA, TextB;
+            
+    set_Ascii (m_nPos);
+  
+    TextA = ascii2LCD (nTextID, nextText);
+    TextB = ascii2LCD (nTextID, nextText+1);
+        
+    if (m_nPos < cx)
+    {
+      m_nDisplay = TextA & 0x55;
+      m_nDisplay |= TextB & 0xAA;
+    }
+    else
+    {
+      if (bToggle == WIPE_LEFT_2_RIGHT)
+      {
+        m_nDisplay = TextA;
+      }
+      else
+      {
+        m_nDisplay = TextB;
+      } // end_if
+    } // end_if
+  } // end_if
+
+  if (m_nPos == A_ENDE)
+  {
+    if (bWipe == TRUE)
+    {
+      if (bToggle == WIPE_LEFT_2_RIGHT)
+      {
+        cx += WIPE_SPEED;
+                
+        if (cx > A_ENDE)
+        {
+          cx = A_ENDE;
+          bToggle = WIPE_RIGHT_2_LEFT;
+        }
+        else
+        {
+          // NOP
+        } // end_if
+      }
+      else
+      {
+        cx -= WIPE_SPEED;
+              
+        if (cx < DISPLAY_CX_MIN)
+        {
+          bToggle = WIPE_LEFT_2_RIGHT;
+                    
+          if (nextText < get_TextLen (nTextID))//nTextLen)
+          {
+            nextText++;
+            bWipe = FALSE;
+          }
+          else
+          {
+            nextText = 0;
+            wait = 0;
+            bWipe = TRUE;
+            cx = DISPLAY_CX_MIN;
+
+            next_Token();
+          } // end_if
+        }
+        else
+        {
+          // NOP
+        } // end_if
+      } // end_if
+    }
+    else
+    {
+      if (wait < WIPE_PAUSE)
+      {
+        wait ++;
+      }
+      else
+      {
+        wait = 0;
+        bWipe = TRUE;
+        cx = DISPLAY_CX_MIN;
+      } // end_if
+    } // end_if
+  }
+  else
+  {
+    // NOP
+  } // end_if
+}
+*/
+
+void wipe_Text(uchar nTextID)
+{
+  static bit bWipe = TRUE;
+  static bit bToggle = WIPE_LEFT_2_RIGHT;    // if True "Start to End" else "End to Start"
+
+  static uchar cx = DISPLAY_CX_MIN;
+  static uchar wait = 0;
+  static uchar nextText = 0;
+    
+  // Function
+  if (m_nPos == cx)
+  {
+    m_nDisplay = DISP_ON;
+  }   
+  else
+  {
+    uchar TextA, TextB;
+            
+    set_Ascii (m_nPos);
+  
+    TextA = ascii2LCD (nTextID, nextText);
+    TextB = ascii2LCD (nTextID, nextText+1);
+        
+    if (m_nPos < cx)
+    {
+      m_nDisplay = TextA & 0x55;
+      m_nDisplay |= TextB & 0xAA;
+    }
+    else
+    {
+      if (bToggle == WIPE_LEFT_2_RIGHT)
+      {
+        m_nDisplay = TextA;
+      }
+      else
+      {
+        m_nDisplay = TextB;
+      } // end_if
+    } // end_if
+  } // end_if
+
+  if (m_nPos == DISPLAY_CX_MAX)
+  {
+    if (bWipe == TRUE)
+    {
+      if (bToggle == WIPE_LEFT_2_RIGHT)
+      {
+        // wipe start to end
+        cx += WIPE_SPEED;
+        
+        if (cx > DISPLAY_CX_MAX)
+        {
+          cx = DISPLAY_CX_MAX;
+          bToggle = WIPE_RIGHT_2_LEFT;
+        }
+        else
+        {
+          // NOP
+        }
+      }
+      else
+      {
+        // wipe end to start
+        if (cx < WIPE_SPEED)
+        {
+          cx = DISPLAY_CX_MIN;                    
+          bToggle = WIPE_LEFT_2_RIGHT;
+                    
+          if (nextText < get_TextLen (nTextID)/*nTextLen*/)
+          {
+            nextText++;
+            bWipe = FALSE;
+          }
+          else
+          {
+            nextText = 0;
+            wait = 0;
+            bWipe = TRUE;
+            cx = DISPLAY_CX_MIN;
+
+            next_Token();
+          } // end_if
+        }
+        else
+        {
+          cx -= WIPE_SPEED;
+        } // end_if
+      } // end_if
+    }
+    else
+    {
+      if (wait < WIPE_PAUSE)
+      {
+        wait ++;
+      }
+      else
+      {
+        wait = 0;
+        bWipe = TRUE;
+        cx = DISPLAY_CX_MIN;
+      } // end_if
+    } // end_if
+  }
+  else
+  {
+    // NOP
+  } // end_if
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// Move Text
+
+#define DOPPEL_ANZEIGE  2 * ANZEIGE
+
+void move_Text(uchar nTextID)
+{
+  static uint offset = 0;
+  static uint temp = 0;
+
+  uint nTextLen;
+
+  // Function
+  nTextLen = get_TextLenInt(nTextID);
+  temp = m_nPos + offset;
+
+  if ((temp >= ANZEIGE) && (temp < nTextLen+ANZEIGE))
+  {
+    set_Ascii(temp-ANZEIGE);
+    m_nDisplay = ascii2LCD(nTextID, 0);
+  }
+  else
+  {
+    m_nDisplay = DISP_OFF;
+  } // end_if
+
+  if (m_nPos == DISPLAY_CX_MAX)
+  {
+    if (temp < (nTextLen + DOPPEL_ANZEIGE))
+    {
+      offset++;
+    }
+    else
+    {
+      offset = 0;
+      next_Token();
+    } // end_if     
+  }
+  else
+  {
+    // NOP
+  } // end_if
+}
+
+///////////////////////////////////////////////////////////////////////////////
+/* Main Loop */
+
+void main(void)
+{
+  // Init the LOOP
+  enable_all_Interrupts();
+
+  // Enable EXTERN Interrup 0
+  enable_EXT0_Interrupt();
+
+  // start while LOOP
+  while (TRUE)
+  {
+    if (m_nPos > DISPLAY_CX_MAX)
+    {
+      m_nPos = DISPLAY_CX_MIN;
+    }
+    else
+    {
+      // Turn off Display 
+      m_nDisplay = DISP_OFF;  
+            
+      // Run Display Function         
+      switch (*m_pToken)   // normaly get_Token()
+      {
+        case GER_OU:
+          push_Text(STATIC_TEXT_GER);
+          break;
+        case GER_WP:
+          wipe_Text(STATIC_TEXT_GER);
+          break;       
+        case GER_LS:  
+          move_Text(MOVE_TEXT_GER);
+          break;                 
+        case ENG_OU:
+          push_Text(STATIC_TEXT_ENG);
+          break;
+        case ENG_WP:
+          wipe_Text(STATIC_TEXT_ENG);
+          break;        
+        case ENG_LS:
+          move_Text(MOVE_TEXT_ENG);
+          break;
+      } // end_switch
+        
+      // Inc Display Position
+      while (put_Line(m_nDisplay) == FALSE)
+      {
+        // NOP
+      }
+            
+      switch (get_BufferSize())
+      {
+        case 0: case 1: case 2: case 3: case 4:
+        case 5: case 6: case 7:
+        case 8:
+          write_Red_LED(0);
+          write_Green_LED(1);
+          break;
+//        case 12:
+//        case 13:
+//        case 14:
+        case 15:
+        case 16:
+          write_Red_LED(1);
+          write_Green_LED(0);
+          break;
+
+        default:
+          write_Green_LED(0);
+          write_Red_LED(0);
+      }
+    
+      // Inc Display Position
+      m_nPos++;
+
+    }   // end_if       
+  }   // end_while  
+}
+

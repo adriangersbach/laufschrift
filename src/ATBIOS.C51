@@ -1,0 +1,139 @@
+// Source File
+// Filename: ATBios.c51
+
+
+#include "System.h"
+#include "ATBios.h"
+
+
+/* ------------------------------------------------------------------------- */
+
+// Definition der Konstanten und Symbole
+
+#define positiv          0x00
+#define negativ          0xFF
+
+#define LED_Port         P1
+
+//sbit LED_Red  = P3^1;
+//sbit LED_Green = P3^0;
+
+#define LED_Port_Red     P3_1
+#define LED_Port_Green   P3_0
+
+#define LED_Logik        negativ
+
+/* ------------------------------------------------------------------------- */
+
+static void put_LEDs(uchar byLED)
+{
+  LED_Port = byLED;
+}
+
+void write_LEDs(uchar byLED)
+{
+  put_LEDs(byLED^LED_Logik);
+//  LED_Port = (byLED^LED_Logik);
+}
+
+/* ------------------------------------------------------------------------- */
+
+void write_Red_LED(bit byLED)
+{
+  LED_Port_Red = byLED;
+}
+
+void write_Green_LED(bit byLED)
+{
+  LED_Port_Green = byLED;
+}
+
+/* ------------------------------------------------------------------------- */
+
+// Ring Buffer Start
+
+#define BUFFER_SIZE     ((uint) (16))  // default 16
+#define BUFFER_FULL     ((uint) (BUFFER_SIZE))
+#define BUFFER_EMPTY    ((uint) (0))
+
+static uchar data   m_nBuffer[BUFFER_SIZE];
+static uchar data * m_p_put = m_nBuffer;
+static uchar data * m_p_get = m_nBuffer;
+
+static uchar m_nIndex = 0;
+
+#define WP_MAX m_nBuffer + BUFFER_SIZE
+#define WP_MIN m_nBuffer
+#define RP_MAX m_nBuffer + BUFFER_SIZE
+#define RP_MIN m_nBuffer
+
+/////////////////////////////////////////////////////////////////////////////
+//
+
+bit put_Line(uchar nValue)
+{
+  bit bStatus = FALSE;
+
+  EA = 0; // Disable all Interrupts
+
+  if (m_nIndex < BUFFER_FULL)
+  {
+    m_nIndex++;                 // Inc Index
+
+    EA = 1; // Enable all Interrupts
+
+    *m_p_put = nValue;  // 
+    m_p_put++;          //
+
+    if (m_p_put >= WP_MAX)
+    {
+      m_p_put = WP_MIN;
+    } // end_if
+
+    bStatus = TRUE;
+  } // end_if
+
+  EA = 1; // Enable all Interrupts
+
+  return bStatus;
+}
+
+/////////////////////////////////////////////////////////////////////////////
+//
+
+uchar get_Line()
+{
+  uchar nValue = DISP_OFF;
+
+  EA = 0; // Disable all Interrupts
+
+  if (m_nIndex > BUFFER_EMPTY)
+  {
+    m_nIndex--;             // Dec Index
+
+    EA = 1; // Enable all Interrupts
+
+    nValue = *m_p_get;
+
+    m_p_get++;
+    
+    if (m_p_get >= RP_MAX)
+    {
+      m_p_get = RP_MIN;
+    } // end_if
+  } // end_if
+
+  EA = 1; // Enable all Interrupts
+
+  return nValue;
+}
+
+/////////////////////////////////////////////////////////////////////////////
+//
+
+uchar get_BufferSize()
+{
+  return m_nIndex;
+}
+
+// Ring Buffer End

@@ -1,0 +1,202 @@
+// Source File
+// Filename: ATtimer.c51
+
+
+#include "System.h"
+#include "ATTimer.h"
+#include "ATBios.h"
+
+
+#define m_clear_T0_Mode  0xF0
+#define m_set_T0_Mode_2  0x02
+
+
+/* ------------------------------------------------------------------------- */
+
+#define max_Cycle_Counter   0
+
+
+// a.) globale Daten --------------------------------
+
+
+// b) lokale Daten   ------------------------------
+
+static bit m_bCycle = FALSE;
+
+///////////////////////////////////////////////////////////////////////////////
+// Implementation
+
+/* ------------------------------------------------------------------------- */
+// Start Timer 0
+
+static void start_T0(void)
+{
+  TR0 = 1;
+}
+
+// ------------------------------------------------------------------------- //
+// Stop Timer 0
+
+static void stop_T0(void)
+{
+  TR0 = 0;
+}
+
+// ------------------------------------------------------------------------- //
+// Reset Timer 0
+
+static void reset_T0(void)
+{
+  stop_T0();
+  TL0 = 0;
+  TH0 = 0;
+  TF0 = 0;
+}
+
+// ------------------------------------------------------------------------- //
+
+void config_T0_us(uchar us)
+{
+  reset_T0();
+  TMOD &= m_clear_T0_Mode;
+  TMOD |= m_set_T0_Mode_2;
+  TL0 = -us;
+  TH0 = -us;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// All Interrupts
+//
+
+void enable_all_Interrupts(void)
+{
+  EA = 1;
+}
+
+// ------------------------------------------------------------------------- //
+
+void disable_all_Interrupts(void)
+{
+  EA = 0;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// Externer Interrupt 0
+//
+
+void enable_EXT0_Interrupt(void)
+{
+  EX0 = 1;
+}
+
+// ------------------------------------------------------------------------- //
+/*
+void disable_EXT0_Interrupt(void)
+{
+  EX0 = 0;
+}
+*/
+///////////////////////////////////////////////////////////////////////////////
+// Timer0 Interrupt
+//
+
+static void enable_T0_Interrupt(void)
+{
+  ET0 = 1;
+}
+
+// ------------------------------------------------------------------------- //
+
+static void disable_T0_Interrupt(void)
+{
+  ET0 = 0;
+}
+
+// ------------------------------------------------------------------------- //
+/*
+static void reset_all_T0_ISRvars(void)
+{
+//  uCycle_Counter = 0;
+  m_bCycle = FALSE;
+}
+*/
+// ------------------------------------------------------------------------- //
+
+#define UM17   245
+#define UM18   231
+#define UM19   219
+#define UM20   208
+#define UM21   198
+#define UM22   189
+#define UM23   181
+#define UM24   173
+#define UM25   166
+
+
+void start_Blink(void)
+{
+  static bit timer_is_initialized;
+
+  if (!timer_is_initialized) 
+  {
+//    reset_all_T0_ISRvars();
+    config_T0_us(UM19);
+    timer_is_initialized = 1;
+  }
+
+  start_T0();
+  enable_T0_Interrupt();
+}
+
+// ------------------------------------------------------------------------- //
+
+void stop_Blink(void)
+{
+  stop_T0();
+  disable_T0_Interrupt();
+//  Rechteck = Level_LOW; 
+}
+
+// ------------------------------------------------------------------------- //
+
+static void ISR_E0(void)  interrupt 0  using 1
+{
+  EX0 = 0;                        // disable External Interrupt 0 (EXT0)
+//  disable_EXT0_Interrupt();
+  start_Blink();
+}
+
+// ------------------------------------------------------------------------- //
+
+static void ISR_T0(void)  interrupt 1  using 1  // VektorAddress = Intnr * 8 + 3
+{
+  static uchar nPos = DISPLAY_CX_MIN;
+  static uchar nDisplay = DISP_OFF;
+
+  nDisplay = DISP_OFF;
+
+  if (m_bCycle == FALSE)
+  {
+    m_bCycle = TRUE;
+  }
+  else
+  {
+    m_bCycle = FALSE;
+
+    if (nPos > DISPLAY_CX_MAX)
+    {
+      nPos = DISPLAY_CX_MIN;
+      stop_Blink();
+      enable_EXT0_Interrupt();
+    }
+    else
+    {
+      nDisplay = get_Line();  // Read Value form Ring
+
+      // next Line
+      nPos++;
+    } // end_if
+  }   // end_if
+
+  write_LEDs(nDisplay);   // Put Led's
+}
